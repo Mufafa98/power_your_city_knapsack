@@ -23,7 +23,7 @@ impl GeneratorData {
 }
 
 #[derive(Clone)]
-struct Chromosome {
+struct Gene {
     id: u8,
     x: u8,
     y: u8,
@@ -31,7 +31,7 @@ struct Chromosome {
     placed: bool,
 }
 
-impl From<GeneratorData> for Chromosome {
+impl From<GeneratorData> for Gene {
     fn from(value: GeneratorData) -> Self {
         Self {
             id: value.id,
@@ -42,21 +42,56 @@ impl From<GeneratorData> for Chromosome {
         }
     }
 }
+#[derive(Clone)]
+struct Chromosome {
+    genes: Vec<Gene>,
+}
+
+impl Chromosome {
+    fn new(gens: &Vec<(GeneratorData, u8)>) -> Self {
+        let mut genes = Vec::new();
+
+        for (generator, count) in gens {
+            genes.extend(iter::repeat(Gene::from(*generator)).take(*count as usize));
+        }
+
+        Self { genes }
+    }
+
+    fn mutate(&mut self) {
+        let rng = rand::RandGenerator::new();
+        for genes in self.genes.iter_mut() {
+            if rng.gen_range(0.0, 1.0) < 0.5 {
+                genes.placed = !genes.placed;
+                if genes.placed && rng.gen_range(0.0, 1.0) < 0.5 {
+                    genes.x = rng.gen_range(0, 10);
+                    genes.y = rng.gen_range(0, 10);
+                }
+            }
+        }
+    }
+
+    fn crossover(&mut self) {}
+}
 
 struct Population {
     chromosomes: Vec<Chromosome>,
 }
 
 impl Population {
-    fn new(gens: &Vec<(GeneratorData, u8)>) -> Self {
+    fn new(pop_size: usize, gens: &Vec<(GeneratorData, u8)>) -> Self {
         let mut chromosomes = Vec::new();
 
-        for (generator, count) in gens {
-            chromosomes.extend(iter::repeat(Chromosome::from(*generator)).take(*count as usize));
+        for i in 0..pop_size {
+            chromosomes.push(Chromosome::new(gens));
         }
 
         Self { chromosomes }
     }
+
+    fn mutate(&mut self) {}
+
+    fn crossover(&mut self) {}
 }
 
 #[macroquad::main("Population Bounds")]
@@ -68,17 +103,23 @@ async fn main() {
     gens.push((gen_1, 10));
     gens.push((gen_2, 5));
 
-    let mut population = Population::new(&gens);
+    let mut population = Population::new(10, &gens);
 
-    population.chromosomes[0].placed = true;
-    population.chromosomes[0].rotated = true;
-    population.chromosomes[0].x = 1;
-    population.chromosomes[0].y = 1;
+    for i in 0..100 {
+        population.mutate();
+        population.crossover();
+    }
 
-    render_population(&population, &gens).await;
+    let mut chromosome = population.chromosomes[0].clone();
+    chromosome.genes[0].placed = true;
+    chromosome.genes[0].rotated = true;
+    chromosome.genes[0].x = 10;
+    chromosome.genes[0].y = 10;
+
+    render_population(&chromosome, &gens).await;
 }
 
-async fn render_population(population: &Population, gens: &[(GeneratorData, u8)]) {
+async fn render_population(chromosome: &Chromosome, gens: &[(GeneratorData, u8)]) {
     let gen_map: HashMap<u8, GeneratorData> = gens.iter().map(|(g, _)| (g.id, *g)).collect();
 
     let scale = 50.0;
@@ -98,7 +139,7 @@ async fn render_population(population: &Population, gens: &[(GeneratorData, u8)]
             BLACK,
         );
 
-        for chromo in &population.chromosomes {
+        for chromo in &chromosome.genes {
             if !chromo.placed {
                 continue;
             }
@@ -113,10 +154,23 @@ async fn render_population(population: &Population, gens: &[(GeneratorData, u8)]
 
             let x = chromo.x as f32 * scale;
             let y = chromo.y as f32 * scale;
-            let color = if generator.gold { GOLD } else { BLUE };
 
-            draw_rectangle(x, y, w * scale, h * scale, color);
+            let (box_color, text_color) = if generator.gold {
+                (GOLD, BLACK)
+            } else {
+                (BLUE, WHITE)
+            };
+
+            draw_rectangle(x, y, w * scale, h * scale, box_color);
             draw_rectangle_lines(x, y, w * scale, h * scale, 2.0, BLACK);
+
+            let text = chromo.id.to_string();
+            let font_size = 30.0;
+            // Offsets to roughly center the text
+            let text_x = x + (w * scale * 0.5) - (font_size * 0.3);
+            let text_y = y + (h * scale * 0.5) + (font_size * 0.3);
+
+            draw_text(&text, text_x, text_y, font_size, text_color);
         }
 
         // Press 'S' to save the current frame as a PNG

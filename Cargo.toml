@@ -1,0 +1,6 @@
+[package]
+name = "power_your_city_knapsack"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]

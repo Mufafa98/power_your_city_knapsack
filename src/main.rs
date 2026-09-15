@@ -1,6 +1,5 @@
-use ::rand::{SeedableRng, rngs::StdRng};
-use macroquad::prelude::*;
-use std::collections::HashMap;
+use ::rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
+use macroquad::prelude::{rand as _, *};
 
 use crate::ga::{Plot, Population};
 
@@ -9,45 +8,82 @@ mod ga;
 #[derive(Clone, Copy)]
 struct GeneratorData {
     id: u8,
-    base_value: u32,
-    width: u8,
-    height: u8,
-    gold: bool,
+    base_value_: u32,
+    width_: u8,
+    height_: u8,
+    gold_: bool,
 }
 
 impl GeneratorData {
-    fn new(id: u8, base_value: u32, width: u8, height: u8, gold: bool) -> Self {
+    fn new(id: u8, base_value_: u32, width_: u8, height_: u8, gold_: bool) -> Self {
         Self {
             id,
-            base_value,
-            width,
-            height,
-            gold,
+            base_value_,
+            width_,
+            height_,
+            gold_,
         }
     }
 }
 
 struct Config {
     elitism: f32,
+    tournament: f32,
+    tournament_k: usize,
+
+    mutate: f64,
+    mutate_pos: f64,
+    mutate_rotation: f64,
+    mutate_placement: f64,
+    mutate_pos_by_nudge: f64,
+
+    outside_penalty_multiplier: i32,
+    overlap_penalty_multiplier: i32,
+
+    polish_top_n: usize,
 }
 
 #[macroquad::main("Population Bounds")]
 async fn main() {
-    let gen_1 = GeneratorData::new(1, 1000, 2, 2, false);
-    let gen_2 = GeneratorData::new(2, 2000, 2, 3, false);
+    let blaze = GeneratorData::new(1, 125, 2, 3, false);
+    let eco_tech = GeneratorData::new(2, 145, 2, 3, false);
+    let eco_tech_g = GeneratorData::new(3, 145, 2, 3, true);
+    let quantum = GeneratorData::new(4, 180, 2, 6, true);
+    let sky = GeneratorData::new(5, 320, 2, 2, false);
+    let sky_g = GeneratorData::new(6, 320, 2, 2, true);
+    let eclipse = GeneratorData::new(7, 650, 6, 3, false);
 
     let mut gens: Vec<(GeneratorData, u8)> = Vec::new();
-    gens.push((gen_1, 10));
-    gens.push((gen_2, 5));
+    gens.push((eco_tech, 38));
+    gens.push((eco_tech_g, 2));
+    gens.push((blaze, 20));
+    gens.push((quantum, 3));
+    gens.push((sky_g, 1));
+    gens.push((sky, 1));
+    gens.push((eclipse, 2));
 
     let plot = Plot::new(7, (3, 4), vec![0, 0, 4, 3, 3, 3, 2, 2, 2, 1, 1, 1]);
 
-    let rng = StdRng::seed_from_u64(31415926535);
-    let config = Config { elitism: 0.1 };
+    let mut rng = StdRng::seed_from_u64(31415926535);
+    let config = Config {
+        elitism: 0.1,
+        tournament: 0.8,
+        tournament_k: 5,
 
-    let mut population = Population::new(10, &gens, &plot, rng, config);
+        mutate: 0.11,
+        mutate_pos: 0.8,
+        mutate_rotation: 0.5,
+        mutate_placement: 0.5,
+        mutate_pos_by_nudge: 0.85,
 
-    let gen_map: HashMap<u8, GeneratorData> = gens.iter().map(|(g, _)| (g.id, *g)).collect();
+        outside_penalty_multiplier: 3,
+        overlap_penalty_multiplier: 7,
+
+        polish_top_n: 1,
+    };
+    gens.shuffle(&mut rng);
+    let mut population = Population::new(100, &gens, &plot, rng, config);
+
     let scale = 17.0;
 
     let mut current_index: usize = 0;
@@ -62,6 +98,11 @@ async fn main() {
                 population.crossover();
                 population.evaluate();
                 population.selection();
+
+                if generation % 50 == 0 {
+                    population.polish_top();
+                }
+
                 generation += 1;
             }
         }
@@ -128,22 +169,22 @@ async fn main() {
                 continue;
             }
 
-            let generator = gen_map.get(&gene.id).unwrap();
-
             let (w, h) = if gene.rotated {
-                (generator.height as f32, generator.width as f32)
+                (gene.h as f32, gene.w as f32)
             } else {
-                (generator.width as f32, generator.height as f32)
+                (gene.w as f32, gene.h as f32)
             };
 
             let x = gene.x as f32 * scale;
             let y = gene.y as f32 * scale;
 
-            let (box_color, text_color) = if generator.gold {
+            let (mut box_color, text_color) = if gene.gold {
                 (GOLD, BLACK)
             } else {
-                (color_u8!(0, 0, 255, 50), WHITE)
+                (BLUE, WHITE)
             };
+
+            box_color.a = 0.5;
 
             draw_rectangle(x, y, w * scale, h * scale, box_color);
             draw_rectangle_lines(x, y, w * scale, h * scale, 2.0, BLACK);
@@ -175,7 +216,8 @@ async fn main() {
         draw_text(
             &format!(
                 "Fitness: {}   gens/frame: {}",
-                chromosome.fitness, gens_per_frame
+                chromosome.fitness.unwrap(),
+                gens_per_frame
             ),
             10.0,
             580.0,

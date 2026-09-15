@@ -184,4 +184,26 @@ impl Plot {
         }
         None
     }
+
+    pub fn chromosome_is_legal(&self, chromosome: &Chromosome) -> bool {
+        let mut occupied = vec![false; (self.width as usize) * (self.height as usize)];
+
+        for gene in chromosome.genes.iter() {
+            if !gene.placed {
+                continue;
+            }
+
+            let (w, h) = if gene.rotated {
+                (gene.h, gene.w)
+            } else {
+                (gene.w, gene.h)
+            };
+
+            if !self.fits_cleanly(gene.x, gene.y, w, h, &occupied) {
+                return false;
+            }
+            self.mark_occupied(gene.x, gene.y, w, h, &mut occupied);
+        }
+        true
+    }
 }

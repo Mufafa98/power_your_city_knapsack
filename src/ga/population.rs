@@ -14,6 +14,7 @@ pub struct Population {
     pub plot: Plot,
     rng: StdRng,
     config: Config,
+    gens: Vec<(GeneratorData, u8)>,
 }
 
 impl Population {
@@ -37,6 +38,7 @@ impl Population {
             plot: plot.clone(),
             rng,
             config,
+            gens: gens.clone(),
         }
     }
 
@@ -124,56 +126,170 @@ impl Population {
             let mut improved = true;
             while improved {
                 improved = false;
-
-                for gi in 0..self.chromosomes[ci].genes.len() {
-                    let original = self.chromosomes[ci].genes[gi].clone();
-                    let current_fit = self.chromosomes[ci].fitness.unwrap();
-
-                    let mut best_gene = original.clone();
-                    let mut best_fit = current_fit;
-
-                    for (dx, dy, rot) in [
-                        (-1i32, 0i32, false),
-                        (1, 0, false),
-                        (0, -1, false),
-                        (0, 1, false),
-                        (0, 0, true),
-                    ] {
-                        let mut g = original.clone();
-                        g.x = ((g.x as i32 + dx).clamp(0, self.plot.width as i32 - 1)) as u8;
-                        g.y = ((g.y as i32 + dy).clamp(0, self.plot.height as i32 - 1)) as u8;
-                        if rot {
-                            g.rotated = !g.rotated;
-                        }
-
-                        self.chromosomes[ci].genes[gi] = g;
-                        self.chromosomes[ci].fitness = None; // invalidate cache
-                        let f = self
-                            .plot
-                            .evaluate_chromosome(&mut self.chromosomes[ci], &self.config);
-
-                        if f > best_fit {
-                            best_fit = f;
-                            best_gene = self.chromosomes[ci].genes[gi].clone();
-                        }
-                    }
-
-                    self.chromosomes[ci].genes[gi] = best_gene;
-
-                    if best_fit > current_fit {
-                        improved = true;
-                    }
-
-                    // restore consistent fitness for the (possibly) modified chromosome
-                    self.chromosomes[ci].fitness = None;
-                    self.plot
-                        .evaluate_chromosome(&mut self.chromosomes[ci], &self.config);
-                }
+                improved |= self.polish_nudges(ci);
+                improved |= self.polish_swaps(ci, 80);
             }
         }
 
-        // resort so index 0 is the actual best after polish
         self.chromosomes
             .sort_unstable_by_key(|c| -c.fitness.unwrap());
     }
+
+    fn polish_nudges(&mut self, ci: usize) -> bool {
+        let mut improved = false;
+
+        for gi in 0..self.chromosomes[ci].genes.len() {
+            let original = self.chromosomes[ci].genes[gi].clone();
+            let current_fit = self.chromosomes[ci].fitness.unwrap();
+
+            let mut best_gene = original.clone();
+            let mut best_fit = current_fit;
+
+            for (dx, dy, rot) in [
+                (-1i32, 0i32, false),
+                (1, 0, false),
+                (0, -1, false),
+                (0, 1, false),
+                (0, 0, true),
+            ] {
+                let mut g = original.clone();
+                g.x = ((g.x as i32 + dx).clamp(0, self.plot.width as i32 - 1)) as u8;
+                g.y = ((g.y as i32 + dy).clamp(0, self.plot.height as i32 - 1)) as u8;
+                if rot {
+                    g.rotated = !g.rotated;
+                }
+
+                self.chromosomes[ci].genes[gi] = g;
+                self.chromosomes[ci].fitness = None;
+                let f = self
+                    .plot
+                    .evaluate_chromosome(&mut self.chromosomes[ci], &self.config);
+
+                if f > best_fit {
+                    best_fit = f;
+                    best_gene = self.chromosomes[ci].genes[gi].clone();
+                }
+            }
+
+            self.chromosomes[ci].genes[gi] = best_gene;
+            if best_fit > current_fit {
+                improved = true;
+            }
+
+            self.chromosomes[ci].fitness = None;
+            self.plot
+                .evaluate_chromosome(&mut self.chromosomes[ci], &self.config);
+        }
+
+        improved
+    }
+
+    fn polish_swaps(&mut self, ci: usize, tries: usize) -> bool {
+        let mut improved = false;
+
+        for _ in 0..tries {
+            let n = self.chromosomes[ci].genes.len();
+            if n < 2 {
+                break;
+            }
+
+            let gi = self.rng.random_range(0..n);
+            let mut gj = self.rng.random_range(0..n);
+            while gj == gi {
+                gj = self.rng.random_range(0..n);
+            }
+
+            let a = &self.chromosomes[ci].genes[gi];
+            let b = &self.chromosomes[ci].genes[gj];
+
+            if !a.placed || !b.placed || a.id == b.id {
+                continue;
+            }
+
+            let current_fit = self.chromosomes[ci].fitness.unwrap();
+
+            let mut trial = self.chromosomes[ci].clone();
+            let (ax, ay, ar) = (a.x, a.y, a.rotated);
+            let (bx, by, br) = (b.x, b.y, b.rotated);
+
+            trial.genes[gi].x = bx;
+            trial.genes[gi].y = by;
+
+            trial.genes[gj].x = ax;
+            trial.genes[gj].y = ay;
+
+            let mut found_legal = false;
+            for (rot_i, rot_j) in [(br, ar), (!br, ar), (br, !ar), (!br, !ar)] {
+                trial.genes[gi].rotated = rot_i;
+                trial.genes[gj].rotated = rot_j;
+
+                if self.plot.chromosome_is_legal(&trial) {
+                    found_legal = true;
+                    break;
+                }
+            }
+
+            if !found_legal {
+                continue;
+            }
+
+            trial.fitness = None;
+            let f = self.plot.evaluate_chromosome(&mut trial, &self.config);
+
+            if f > current_fit {
+                trial.fitness = Some(f);
+                self.chromosomes[ci] = trial;
+                improved = true;
+            }
+        }
+
+        improved
+    }
+
+    pub fn inject_fresh(&mut self, fraction: f32) {
+        let n = ((self.pop_size as f32 * fraction) as usize).max(1);
+        let len = self.chromosomes.len();
+        for i in len - n..len {
+            let mut c = Chromosome::random(&self.gens, &mut self.rng, &self.plot);
+            c.repair(&self.plot, &mut self.rng);
+            self.chromosomes[i] = c;
+        }
+    }
+
+    pub fn deduplicate(&mut self) {
+        use std::collections::HashSet;
+
+        let mut seen: HashSet<u64> = HashSet::with_capacity(self.chromosomes.len());
+        let mut dups: Vec<usize> = Vec::new();
+
+        for (i, c) in self.chromosomes.iter().enumerate() {
+            let h = chromosome_hash(c);
+            if !seen.insert(h) {
+                dups.push(i);
+            }
+        }
+
+        for i in dups {
+            let mut m = self.chromosomes[i].mutate(&mut self.rng, &self.plot, &self.config);
+            m.repair(&self.plot, &mut self.rng);
+            m.fitness = None;
+            self.plot.evaluate_chromosome(&mut m, &self.config);
+            self.chromosomes[i] = m;
+        }
+    }
+}
+fn chromosome_hash(c: &Chromosome) -> u64 {
+    // FNV-1a over the placed genes' (id, x, y, rotated). Order-independent
+    // is nicer but the gene order is fixed, so a simple sequential hash works.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for g in c.genes.iter() {
+        if !g.placed {
+            continue;
+        }
+        for byte in [g.id, g.x, g.y, g.rotated as u8] {
+            h ^= byte as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    h
 }

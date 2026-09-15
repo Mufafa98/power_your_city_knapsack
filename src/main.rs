@@ -49,8 +49,8 @@ async fn main() {
     let eco_tech = GeneratorData::new(2, 145, 2, 3, false);
     let eco_tech_g = GeneratorData::new(3, 145, 2, 3, true);
     let quantum = GeneratorData::new(4, 180, 2, 6, true);
-    let sky = GeneratorData::new(5, 320, 2, 2, false);
-    let sky_g = GeneratorData::new(6, 320, 2, 2, true);
+    let sky = GeneratorData::new(5, 320, 3, 3, false);
+    let sky_g = GeneratorData::new(6, 320, 3, 3, true);
     let eclipse = GeneratorData::new(7, 650, 6, 3, false);
 
     let mut gens: Vec<(GeneratorData, u8)> = Vec::new();
@@ -74,7 +74,7 @@ async fn main() {
         mutate_pos: 0.8,
         mutate_rotation: 0.5,
         mutate_placement: 0.5,
-        mutate_pos_by_nudge: 0.85,
+        mutate_pos_by_nudge: 0.75,
 
         outside_penalty_multiplier: 3,
         overlap_penalty_multiplier: 7,
@@ -82,14 +82,14 @@ async fn main() {
         polish_top_n: 1,
     };
     gens.shuffle(&mut rng);
-    let mut population = Population::new(100, &gens, &plot, rng, config);
+    let mut population = Population::new(120, &gens, &plot, rng, config);
 
     let scale = 17.0;
 
     let mut current_index: usize = 0;
     let mut generation: u64 = 0;
     let mut paused = false;
-    let mut gens_per_frame: usize = 1;
+    let mut gens_per_frame: usize = 64;
 
     loop {
         if !paused {
@@ -98,9 +98,13 @@ async fn main() {
                 population.crossover();
                 population.evaluate();
                 population.selection();
+                population.deduplicate();
 
                 if generation % 50 == 0 {
                     population.polish_top();
+                }
+                if generation % 100 == 0 {
+                    population.inject_fresh(0.25);
                 }
 
                 generation += 1;

@@ -272,7 +272,7 @@ impl Plot {
             }
 
             let outside_penalty = area_out_plot * value;
-            let overlap_penalty = overlap_area * value;
+            let overlap_penalty = overlap_area * value * 5;
             fitness += (base_fitness - outside_penalty - overlap_penalty) / area;
         }
         chromosome.fitness = fitness;

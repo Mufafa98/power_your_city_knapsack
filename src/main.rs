@@ -81,7 +81,33 @@ impl Chromosome {
         mutant
     }
 
-    fn crossover(&mut self) {}
+    fn crossover(&self, rng: &mut StdRng, other: &Self) -> Self {
+        let idx = rng.random_range(0..self.genes.len());
+        let mut new_genes: Vec<Gene> = Vec::with_capacity(self.genes.len());
+
+        let from_first = rng.random_bool(0.5);
+
+        for i in 0..self.genes.len() {
+            if from_first {
+                if i < idx {
+                    new_genes.push(self.genes[i].clone());
+                } else {
+                    new_genes.push(other.genes[i].clone());
+                }
+            } else {
+                if i >= idx {
+                    new_genes.push(self.genes[i].clone());
+                } else {
+                    new_genes.push(other.genes[i].clone());
+                }
+            }
+        }
+
+        Self {
+            genes: new_genes,
+            fitness: 0,
+        }
+    }
 }
 
 struct Population {
@@ -119,7 +145,7 @@ impl Population {
 
     fn mutate(&mut self) {
         let mut mutants = Vec::new();
-        for chromosome in self.chromosomes.iter_mut() {
+        for chromosome in self.chromosomes.iter() {
             let mutant = chromosome.mutate(&mut self.rng, &self.plot);
             mutants.push(mutant);
         }
@@ -127,9 +153,13 @@ impl Population {
     }
 
     fn crossover(&mut self) {
-        for chromosome in self.chromosomes.iter_mut() {
-            chromosome.crossover();
+        let mut offsprings = Vec::new();
+        for chromosome in self.chromosomes.iter() {
+            let parent = &self.chromosomes[self.rng.random_range(0..self.chromosomes.len())];
+            let offspring = chromosome.crossover(&mut self.rng, &parent);
+            offsprings.push(offspring);
         }
+        self.chromosomes.extend_from_slice(&offsprings);
     }
 
     fn evaluate(&mut self) {
